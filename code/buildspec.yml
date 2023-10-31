@@ -1,0 +1,47 @@
+version: 0.2
+
+phases:
+  pre_build:
+    commands:
+      - ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+      - aws --region $AWS_DEFAULT_REGION ecr get-login-password | docker login --username AWS --password-stdin $ECRFORPHP_URI
+      - aws --region $AWS_DEFAULT_REGION ecr get-login-password | docker login --username AWS --password-stdin $ECRFORNGINX_URI
+      - TaskRoleARN="arn:aws:iam::${ACCOUNT_ID}:role/ECSTaskIAMRole" 
+      - TaskExecutionRoleARN="arn:aws:iam::${ACCOUNT_ID}:role/ECSExecutionIAMRole" 
+      - sed -i -e s@\<TASK_ROLE\>@$TaskRoleARN@ taskdef.json
+      - sed -i -e s@\<EXECUTION_ROLE\>@$TaskExecutionRoleARN@ taskdef.json
+      - sed -i -e s@\<RDS_ENDPOINT\>@$RDSENDPOINT@ taskdef.json
+      - sed -i -e s@\<RDS_SECRETS\>@$RDSSECRETS@ taskdef.json
+      - sed -i -e s@\<EFS_ID\>@$EFSID@ taskdef.json
+
+  build:
+    commands:
+      - docker build -t php:latest -f Dockerfile_php .
+      - docker tag php:latest $ECRFORPHP_URI:latest
+      - docker build -t nginx:latest -f Dockerfile_nginx .
+      - docker tag nginx:latest $ECRFORNGINX_URI:latest
+
+  post_build:
+    commands:
+      - docker push $ECRFORPHP_URI:latest
+      - docker push $ECRFORNGINX_URI:latest
+      - mkdir artifact2
+      - mkdir artifact3
+      - printf '{"ImageURI":"%s:latest"}' $ECRFORPHP_URI > artifact2/imageDetail.json
+      - printf '{"ImageURI":"%s:latest"}' $ECRFORNGINX_URI > artifact3/imageDetail.json
+
+artifacts:
+  secondary-artifacts:
+    BuildArtifact1:
+      files:
+        - taskdef.json
+        - appspec.yaml
+      discard-paths: yes
+    BuildArtifact2:
+      files:
+        - artifact2/imageDetail.json
+      discard-paths: yes
+    BuildArtifact3:
+      files:
+        - artifact3/imageDetail.json
+      discard-paths: yes

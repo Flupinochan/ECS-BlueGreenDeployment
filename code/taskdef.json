@@ -1,0 +1,106 @@
+{
+  "family": "ECSTaskDefinition",
+  "executionRoleArn": "<EXECUTION_ROLE>",
+  "taskRoleArn": "<TASK_ROLE>",
+  "networkMode": "awsvpc",
+  "runtimePlatform": { "operatingSystemFamily": "LINUX" },
+  "requiresCompatibilities": ["EC2"],
+  "cpu": "2048",
+  "memory": "4096",
+  "volumes": [
+    {
+      "name": "EFSVolume",
+      "efsVolumeConfiguration": {
+        "fileSystemId": "<EFS_ID>",
+        "rootDirectory": "/"
+      }
+    }
+  ],
+  "containerDefinitions": [
+    {
+      "name": "php-container",
+      "image": "<PHP_IMAGE>",
+      "cpu": 1024,
+      "memory": 2048,
+      "mountPoints": [
+        {
+          "sourceVolume": "EFSVolume",
+          "containerPath": "/var/www/html"
+        }
+      ],
+      "environment": [
+        {
+          "name": "WORDPRESS_DB_HOST",
+          "value": "<RDS_ENDPOINT>"
+        },
+        {
+          "name": "WORDPRESS_DB_USER",
+          "value": "wordpress_db_user"
+        },
+        {
+          "name": "WORDPRESS_DB_NAME",
+          "value": "wordpress_db"
+        }
+      ],
+      "secrets": [
+        {
+          "name": "WORDPRESS_DB_PASSWORD",
+          "valueFrom": "<RDS_SECRETS>:password::"
+        }
+      ],
+      "healthCheck": {
+        "command": ["CMD-SHELL", "php -r 'echo \"Healthy\";' || exit 1"],
+        "startPeriod": 60
+      },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-region": "ap-northeast-1",
+          "awslogs-group": "ECS-Stack-ECSTaskLogs",
+          "awslogs-stream-prefix": "php-container"
+        }
+      },
+      "linuxParameters": {
+        "initProcessEnabled": true
+      }
+    },
+    {
+      "name": "nginx-container",
+      "image": "<NGINX_IMAGE>",
+      "cpu": 1024,
+      "memory": 2048,
+      "portMappings": [
+        {
+          "containerPort": 80
+        }
+      ],
+      "mountPoints": [
+        {
+          "sourceVolume": "EFSVolume",
+          "containerPath": "/var/www/html"
+        }
+      ],
+      "dependsOn": [
+        {
+          "condition": "HEALTHY",
+          "containerName": "php-container"
+        }
+      ],
+      "healthCheck": {
+        "command": ["CMD-SHELL", "curl -f http://localhost/readme.html || exit 1"],
+        "startPeriod": 60
+      },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-region": "ap-northeast-1",
+          "awslogs-group": "ECS-Stack-ECSTaskLogs",
+          "awslogs-stream-prefix": "nginx-container"
+        }
+      },
+      "linuxParameters": {
+        "initProcessEnabled": true
+      }
+    }
+  ]
+}

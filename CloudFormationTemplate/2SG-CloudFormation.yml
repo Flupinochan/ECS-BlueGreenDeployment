@@ -1,0 +1,115 @@
+# Create a [VPC-Stack] in advance
+# Create a stack with the name [SG-Stack]
+
+# AWS resources to be built
+# ・SecurityGroup ×5
+
+Parameters:
+  VPCStackName:
+    Type: String
+    Default: 'VPC-Stack'
+
+
+
+
+
+Resources:
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "for ALB"
+      GroupName: "ALB-SG"
+      SecurityGroupIngress: 
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      VpcId:
+        Fn::ImportValue: 
+          !Sub "${VPCStackName}-VPCID"
+
+  # Since the EC2 instance uses a dynamic port instead of port 80, it needs to be allowed for ALL traffic.
+  ECSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "for ECS"
+      GroupName: "ECS-SG"
+      SecurityGroupIngress:
+        - IpProtocol: -1
+          FromPort: -1
+          ToPort: -1
+          SourceSecurityGroupId: !GetAtt ALBSecurityGroup.GroupId
+      VpcId:
+        Fn::ImportValue: 
+          !Sub "${VPCStackName}-VPCID"
+
+  EFSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "for EFS"
+      GroupName: "EFS-SG"
+      SecurityGroupIngress: 
+        - IpProtocol: tcp
+          FromPort: 2049
+          ToPort: 2049
+          SourceSecurityGroupId: !GetAtt ECSSecurityGroup.GroupId
+      VpcId:
+        Fn::ImportValue: 
+          !Sub "${VPCStackName}-VPCID"
+
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "for RDS"
+      GroupName: "RDS-SG"
+      SecurityGroupIngress: 
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId: !GetAtt ECSSecurityGroup.GroupId
+      VpcId:
+        Fn::ImportValue: 
+          !Sub "${VPCStackName}-VPCID"
+
+  CodeBuildSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "for CodeBuild"
+      GroupName: "CodeBuild-SG"
+      VpcId:
+        Fn::ImportValue: 
+          !Sub "${VPCStackName}-VPCID"
+
+
+
+
+
+Outputs:
+  ALBSecurityGroupId:
+    Value: !GetAtt ALBSecurityGroup.GroupId
+    Export:
+      Name: !Sub "${AWS::StackName}-ALBSecurityGroupId"
+
+  ECSSecurityGroupId:
+    Value: !GetAtt ECSSecurityGroup.GroupId
+    Export:
+      Name: !Sub "${AWS::StackName}-ECSSecurityGroupId"
+
+  EFSSecurityGroupId:
+    Value: !GetAtt EFSSecurityGroup.GroupId
+    Export:
+      Name: !Sub "${AWS::StackName}-EFSSecurityGroupId"
+
+  RDSSecurityGroupId:
+    Value: !GetAtt RDSSecurityGroup.GroupId
+    Export:
+      Name: !Sub "${AWS::StackName}-RDSSecurityGroupId"
+
+  CodeBuildSecurityGroupId:
+    Value: !GetAtt CodeBuildSecurityGroup.GroupId
+    Export:
+      Name: !Sub "${AWS::StackName}-CodeBuildSecurityGroupId"

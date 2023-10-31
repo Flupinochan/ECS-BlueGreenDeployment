@@ -1,0 +1,323 @@
+# Create a [ECS-Stack] in advance
+# Create a stack with the name [CodePipeline-Stack]
+
+# Interneal Error -> There is an error in the format of 「taskdef.json」
+
+# AWS resources to be built
+# ・CodePipeline
+# ・CodeDeploy
+# ・S3 Bucket (For CodePipeline)
+# ・Lambda (To delete S3 Bucket)
+# ・EventBridge Rule (For CodePipeline)
+
+Parameters:
+  ECRCodeCommitBuildStackStackName:
+    Type: String
+    Default: 'ECR-CodeCommitBuild-Stack'
+
+  ALBStackName:
+    Type: String
+    Default: 'ALB-Stack'
+
+  MainBranchName:
+    Type: String
+    Default: 'master'
+
+
+
+
+
+Resources:
+  CodePipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: "wordpress-codepipeline"
+      ArtifactStore:
+        Type: "S3"
+        Location: !Ref CodePipelineS3
+      RoleArn: !GetAtt CodePipelineIAMRole.Arn
+      Stages:
+        - Name: "Source"
+          Actions:
+            - Name: "Source"
+              ActionTypeId:
+                Category: "Source"
+                Owner: "AWS"
+                Provider: "CodeCommit"
+                Version: "1"
+              Configuration:
+                PollForSourceChanges: false
+                BranchName: !Ref MainBranchName
+                RepositoryName:
+                  !ImportValue
+                    Fn::Sub: "${ECRCodeCommitBuildStackStackName}-CodeCommitName"
+              OutputArtifacts:
+                - Name: "SourceArtifacts"
+        - Name: "Build"
+          Actions:
+            - Name: "Build"
+              ActionTypeId:
+                Category: "Build"
+                Owner: "AWS"
+                Provider: "CodeBuild"
+                Version: "1"
+              Configuration:
+                ProjectName:
+                  !ImportValue
+                    Fn::Sub: "${ECRCodeCommitBuildStackStackName}-CodeBuildName"
+              InputArtifacts:
+                - Name: "SourceArtifacts"
+              OutputArtifacts:
+                - Name: "BuildArtifact1"
+                - Name: "BuildArtifact2"
+                - Name: "BuildArtifact3"
+        - Name: "Deploy"
+          Actions:
+            - Name: "Deploy"
+              ActionTypeId:
+                Category: "Deploy"
+                Owner: "AWS"
+                Provider: "CodeDeployToECS"
+                Version: "1"
+              Configuration:
+                ApplicationName: !Ref CodeDeployApplication
+                DeploymentGroupName: !Ref CodeDeployDeploymentGroup
+                TaskDefinitionTemplateArtifact: "BuildArtifact1"
+                TaskDefinitionTemplatePath: "taskdef.json"
+                AppSpecTemplateArtifact: "BuildArtifact1"
+                AppSpecTemplatePath: "appspec.yaml"
+                Image1ArtifactName: 'BuildArtifact2'
+                Image1ContainerName: 'PHP_IMAGE'
+                Image2ArtifactName: 'BuildArtifact3'
+                Image2ContainerName: 'NGINX_IMAGE'
+              InputArtifacts:
+                - Name: "BuildArtifact1"
+                - Name: "BuildArtifact2"
+                - Name: "BuildArtifact3"
+
+  CodeDeployApplication:
+    Type: AWS::CodeDeploy::Application
+    Properties:
+      ApplicationName: "wordpress-codedeployapp"
+      ComputePlatform: "ECS"
+
+# In ECS Blue/Green deployments, the switch is not between old and new EC2 instances, but between old and new tasks.
+
+# The DeploymentConfigName that is available by default is set in the deployment configurations of CodeDeploy. It is also possible to define it customly.
+# CodeDeployDefault.ECSAllAtOnce
+# CodeDeployDefault.ECSLinear10PercentEvery1Minutes
+# CodeDeployDefault.ECSLinear10PercentEvery3Minutes
+# CodeDeployDefault.ECSCanary10Percent5Minutes
+# CodeDeployDefault.ECSCanary10Percent15Minutes
+  CodeDeployDeploymentGroup:
+    Type: AWS::CodeDeploy::DeploymentGroup
+    Properties:
+      DeploymentGroupName: "CodeDeployDeploymentGroup"
+      ApplicationName: !Ref CodeDeployApplication
+      AutoRollbackConfiguration:
+        Enabled: True
+        Events:
+          - "DEPLOYMENT_FAILURE"
+          - "DEPLOYMENT_STOP_ON_ALARM"
+          - "DEPLOYMENT_STOP_ON_REQUEST"
+      BlueGreenDeploymentConfiguration:
+        DeploymentReadyOption:
+          ActionOnTimeout: "CONTINUE_DEPLOYMENT"
+        TerminateBlueInstancesOnDeploymentSuccess:
+          Action: "TERMINATE"
+          TerminationWaitTimeInMinutes: 3
+      DeploymentConfigName: "CodeDeployDefault.ECSAllAtOnce" # Set AllAtOnce, Canary or Linear
+      DeploymentStyle:
+        DeploymentOption: "WITH_TRAFFIC_CONTROL"
+        DeploymentType: "BLUE_GREEN"
+      ECSServices:
+        - ClusterName: "ECSCluster"
+          ServiceName: "ECSService"
+      LoadBalancerInfo:
+        TargetGroupPairInfoList:
+          - ProdTrafficRoute:
+              ListenerArns:
+                - !ImportValue
+                    Fn::Sub: "${ALBStackName}-ALBListenerArn"
+            TargetGroups: # Specify two TargetGroups
+              - Name:
+                  !ImportValue
+                    Fn::Sub: "${ALBStackName}-ALBTargetGroupName"
+              - Name:
+                  !ImportValue
+                    Fn::Sub: "${ALBStackName}-ALBTargetGroup2Name"
+      ServiceRoleArn: !GetAtt CodeDeployIAMRole.Arn
+
+  EventBridgeRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: "EventBridgeRule-wordpress-codepipeline"
+      EventBusName: "default"
+      State: "ENABLED"
+      EventPattern:
+        source:
+          - aws.codecommit
+        detail-type:
+          - 'CodeCommit Repository State Change'
+        resources:
+          - !ImportValue
+              Fn::Sub: "${ECRCodeCommitBuildStackStackName}-CodeCommitRepositoryARN"
+        detail:
+          event:
+            - referenceCreated
+            - referenceUpdated
+          referenceType:
+            - branch
+          referenceName:
+            - !Ref MainBranchName
+      Targets: 
+        - Arn: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:wordpress-codepipeline"
+          Id: CodePipeline
+          RoleArn: !GetAtt EventBridgeIAMRole.Arn
+
+  CodePipelineS3:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: "code-stack-codepipeline-s3"
+      VersioningConfiguration:
+        Status: "Enabled"
+      IntelligentTieringConfigurations:
+        - Id: "IntelligentTieringConfigurations"
+          Status: "Enabled"
+          Tierings:
+            - Days: 90
+              AccessTier: "ARCHIVE_ACCESS"
+            - Days: 180
+              AccessTier: "DEEP_ARCHIVE_ACCESS"
+
+# To empty the bucket contents and delete S3 when deleting the stack
+# Executed only when the stack is deleted by an if statement
+  LambdaDeleteS3Object:
+    Type: AWS::Lambda::Function
+    Properties: 
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaRole.Arn
+      Runtime: python3.10
+      Timeout: 300
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+
+          def lambda_handler(event, context):
+              s3 = boto3.resource('s3')
+              try:
+                  if event['RequestType'] == 'Delete':
+                      bucket = s3.Bucket(event['ResourceProperties']['BucketName'])
+                      bucket.objects.all().delete()
+                      bucket.object_versions.all().delete()
+                      s3.Bucket(event['ResourceProperties']['BucketName']).delete()
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+              except Exception as e:
+                  print("Error: ", e)
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {})
+
+  InvokeLambdaDeleteS3Object:
+    Type: Custom::EmptyS3Bucket
+    DependsOn: CodePipelineS3
+    Properties:
+      ServiceToken: !GetAtt LambdaDeleteS3Object.Arn
+      BucketName: !Ref CodePipelineS3
+
+
+
+
+
+
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: LambdaDeleteS3ObjectPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:*
+                  - logs:*
+                Resource:
+                  - Fn::Sub: ${CodePipelineS3.Arn}
+                  - Fn::Sub: ${CodePipelineS3.Arn}/*
+
+  CodePipelineIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: "CodePipelineIAMRole"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - "sts:AssumeRole"
+            Principal:
+              Service:
+                - codepipeline.amazonaws.com
+      Policies:
+        - PolicyName: "CodePipelineIAMPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "codecommit:*"
+                  - "codebuild:*"
+                  - "codedeploy:*"
+                  - "s3:*"
+                  - "ecs:*"
+                  - "elasticloadbalancing:*"
+                  - "cloudwatch:*"
+                  - "sns:*"
+                  - "iam:PassRole"
+                Resource: "*"
+
+  CodeDeployIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: "CodeDeployIAMRole"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - "sts:AssumeRole"
+            Principal:
+              Service:
+                - codedeploy.amazonaws.com
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/AWSCodeDeployRoleForECS'
+
+  EventBridgeIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: "EventBridgeIAMRole"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - "sts:AssumeRole"
+            Principal:
+              Service:
+                - events.amazonaws.com
+      Policies:
+        - PolicyName: "EventBridgeIAMPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "codepipeline:StartPipelineExecution"
+                Resource: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:wordpress-codepipeline"
