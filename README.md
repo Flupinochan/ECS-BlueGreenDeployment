@@ -14,7 +14,7 @@
 6. Create a CloudFormation Stack named [ECR-CodeCommitBuild-Stack]
 7. Upload code to CodeCommit<br>
     ※Please refer to the [UploadCodeToCodeCommit.txt] manual
-8. Create a ECS Images
+8. Create a ECS Images<br>
     ※In the AWS Management Console (CodeBuild), select the [wordpress-codebuild] project and run build to create the ECS image
 9. Create a CloudFormation Stack named [ALB-Stack]
 10. Create a CloudFormation Stack named [ECS-Stack]<br>
