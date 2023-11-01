@@ -5,7 +5,7 @@
 # ・EC2LaunchTemplate
 # ・EC2AutoScaling
 # ・ALB
-# ・ALBTargetGroup ×2
+# ・ALBTargetGroup
 # ・ALBListener (HTTP or HTTPS)
 # ・Lambda
 
@@ -208,31 +208,6 @@ Resources:
         !ImportValue
           Fn::Sub: "${VPCStackName}-VPCID"
 
-  # Need a second one for ECS Blue/Green Deployment
-  ALBTargetGroup2:
-    Type: AWS::ElasticLoadBalancingV2::TargetGroup
-    Properties:
-      Name: "ALBTargetGroup2"
-      HealthCheckIntervalSeconds: 60
-      HealthCheckPath: "/readme.html"
-      HealthCheckPort: "traffic-port"
-      HealthCheckProtocol: "HTTP"
-      HealthyThresholdCount: 2
-      UnhealthyThresholdCount: 10
-      Matcher:
-        HttpCode: "200-299,301,302"
-      Port: 80
-      Protocol: "HTTP"
-      TargetGroupAttributes:
-        - Key: "stickiness.enabled"
-          Value: False
-        - Key: "load_balancing.algorithm.type"
-          Value: "least_outstanding_requests"
-      TargetType: "ip"
-      VpcId:
-        !ImportValue
-          Fn::Sub: "${VPCStackName}-VPCID"
-
   ALBHTTPSListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Condition: IsHTTPS
@@ -361,20 +336,10 @@ Outputs:
     Export:
       Name: !Sub "${AWS::StackName}-ALBTargetGroupArn"
 
-  ALBTargetGroup2Arn:
-    Value: !GetAtt ALBTargetGroup2.TargetGroupArn
-    Export:
-      Name: !Sub "${AWS::StackName}-ALBTargetGroup2Arn"
-
   ALBTargetGroupName:
     Value: !GetAtt ALBTargetGroup.TargetGroupName
     Export:
       Name: !Sub "${AWS::StackName}-ALBTargetGroupName"
-
-  ALBTargetGroup2Name:
-    Value: !GetAtt ALBTargetGroup2.TargetGroupName
-    Export:
-      Name: !Sub "${AWS::StackName}-ALBTargetGroup2Name"
 
   ALBHTTPSListenerArn:
     Condition: IsHTTPS
