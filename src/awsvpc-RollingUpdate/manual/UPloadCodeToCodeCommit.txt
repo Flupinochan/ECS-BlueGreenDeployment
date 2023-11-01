@@ -1,0 +1,16 @@
+ご自身でDockerfile等のコードをCodeCommitにアップロードしてください
+★CloudShellを利用する場合は、CloudShellを起動するIAMユーザがCodeCommitへアクセスできる必要があります
+
+■例
+CloudShellで実施する方法
+※CloudShellを起動し、「code.zip」をCloudShellにアップロードしてください
+
+unzip code.zip
+git clone codecommit::ap-northeast-1://wordpress-repo
+find . -maxdepth 1 -type f ! -name 'code.zip' ! -name '.*' -exec mv {} wordpress-repo/ \;
+cd wordpress-repo/
+git config --global user.name "Your Full Name"
+git config --global user.email "youremail@example.com"
+git add .
+git commit -m "Add Code"
+git push

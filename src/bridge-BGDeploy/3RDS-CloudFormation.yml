@@ -1,0 +1,164 @@
+# Create a [VPC-Stack] and [SG-Stack] in advance
+# Create a stack with the name [RDS-Stack]
+
+# AWS resources to be built
+# ・RDS SubnetGroup
+# ・RDS Cluster
+#       - Instance(1A、1C)
+# ・RDS AutoScaling
+# ※Secrets Manager
+
+Parameters:
+  VPCStackName:
+    Type: String
+    Default: 'VPC-Stack'
+
+  SGStackName:
+    Type: String
+    Default: 'SG-Stack'
+
+  EngineVersionInput:
+    Type: String
+    Default: '8.0.mysql_aurora.3.04.0'
+
+  DBInstanceClassInput:
+    Type: String
+    Default: 'db.t4g.medium'
+
+# If DBName or DBUser is set directly, outputs will not be available in Outputs.
+  DBName:
+    Type: String
+    Default: 'wordpress_db'
+
+  DBUser:
+    Type: String
+    Default: 'wordpress_db_user'
+
+
+
+
+
+Resources:
+  # Composed of two Protected Subnets
+  DBSubnetGroup:
+    Type: "AWS::RDS::DBSubnetGroup"
+    Properties:
+      DBSubnetGroupDescription: "RDS Subnet Group"
+      DBSubnetGroupName: "DBSubnetGroup"
+      SubnetIds:
+        - !ImportValue
+            Fn::Sub: "${VPCStackName}-ProtectedSubnetID1A"
+        - !ImportValue
+            Fn::Sub: "${VPCStackName}-ProtectedSubnetID1C"
+
+  RDSCluster:
+    Type: "AWS::RDS::DBCluster"
+    DeletionPolicy: Delete # Default setting is Snapshot, so Snapshot is created when DB is deleted.
+    Properties:
+      Engine: "aurora-mysql"
+      EngineVersion: !Ref EngineVersionInput
+      EngineMode: "provisioned"
+      DBClusterIdentifier: "aurora-cluster"
+      MasterUsername: !Ref DBUser
+      ManageMasterUserPassword: true # Use Secrets Manager
+      StorageType: "aurora"
+      VpcSecurityGroupIds:
+        - !ImportValue
+            Fn::Sub: "${SGStackName}-RDSSecurityGroupId"
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      Port: 3306
+      DatabaseName: !Ref DBName
+      AvailabilityZones:
+        - "ap-northeast-1a"
+        - "ap-northeast-1c"
+      BackupRetentionPeriod: "7"
+      DeletionProtection: False
+      StorageEncrypted: False
+
+  RDSInstance1A:
+    Type: "AWS::RDS::DBInstance"
+    Properties:
+      Engine: "aurora-mysql"
+      DBClusterIdentifier: !Ref RDSCluster
+      DBInstanceIdentifier: "aurora-instance1a"
+      DBInstanceClass: !Ref DBInstanceClassInput
+      AvailabilityZone: "ap-northeast-1a"
+      PubliclyAccessible: False
+      EnablePerformanceInsights: False
+      MonitoringInterval: "0"
+
+  RDSInstance1C:
+    Type: "AWS::RDS::DBInstance"
+    Properties:
+      Engine: "aurora-mysql"
+      DBClusterIdentifier: !Ref RDSCluster
+      DBInstanceIdentifier: "aurora-instance1c"
+      DBInstanceClass: !Ref DBInstanceClassInput
+      AvailabilityZone: "ap-northeast-1c"
+      PubliclyAccessible: False
+      EnablePerformanceInsights: False
+      MonitoringInterval: "0"
+
+  ScalableTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: 4
+      MinCapacity: 1
+      RoleARN:
+        Fn::Sub: 'arn:aws:iam::${AWS::AccountId}:role/aws-service-role/rds.application-autoscaling.amazonaws.com/AWSServiceRoleForApplicationAutoScaling_RDSCluster'
+      ServiceNamespace: rds
+      ScalableDimension: rds:cluster:ReadReplicaCount
+      ResourceId: !Sub cluster:${RDSCluster}
+
+  ScalingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: !Sub ${AWS::StackName}-target-tracking-cpu80
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref ScalableTarget
+      TargetTrackingScalingPolicyConfiguration:
+        TargetValue: 80
+        PredefinedMetricSpecification:
+          PredefinedMetricType: RDSReaderAverageCPUUtilization
+        ScaleInCooldown: 600
+        ScaleOutCooldown: 300
+
+
+
+
+
+Outputs:
+  RDSClusterWriteEndpoint:
+    Value: !GetAtt RDSCluster.Endpoint.Address
+    Export:
+      Name: !Sub "${AWS::StackName}-RDSClusterWriteEndpoint"
+
+  # RDSClusterReadEndpoint:
+  #   Value: !GetAtt RDSCluster.ReadEndpoint.Address
+  #   Export:
+  #     Name: !Sub "${AWS::StackName}-RDSClusterReadEndpoint"
+
+  # RDSInstanceEndpoint1A:
+  #   Value: !GetAtt RDSInstance1A.Endpoint.Address
+  #   Export:
+  #     Name: !Sub "${AWS::StackName}-RDSInstanceEndpoint1A"
+
+  # RDSInstanceEndpoint1C:
+  #   Value: !GetAtt RDSInstance1C.Endpoint.Address
+  #   Export:
+  #     Name: !Sub "${AWS::StackName}-RDSInstanceEndpoint1C"
+
+  RDSClusterMasterUsername:
+    Value: !Ref DBUser
+    Export:
+      Name: !Sub "${AWS::StackName}-RDSClusterMasterUsername"
+
+  RDSClusterMasterUserPassword:
+    Value: !GetAtt RDSCluster.MasterUserSecret.SecretArn
+    Export:
+      Name: !Sub "${AWS::StackName}-RDSClusterMasterUserPassword"
+
+  RDSClusterDatabaseName:
+    Value: !Ref DBName
+    Export:
+      Name: !Sub "${AWS::StackName}-RDSClusterDatabaseName"

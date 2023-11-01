@@ -1,0 +1,399 @@
+# Create a [VPC-Stack] and [SG-Stack] in advance
+# Create a stack with the name [ALB-Stack]
+
+# AWS resources to be built
+# ・EC2LaunchTemplate
+# ・EC2AutoScaling
+# ・ALB
+# ・ALBTargetGroup ×2
+# ・ALBListener (HTTP or HTTPS)
+# ・Lambda
+
+Parameters:
+  UseHTTPS:
+    Type: String
+    Default: 'False'
+    AllowedValues:
+      - 'True'
+      - 'False'
+
+  VPCStackName:
+    Type: String
+    Default: 'VPC-Stack'
+
+  SGStackName:
+    Type: String
+    Default: 'SG-Stack'
+
+  ECSOptimizedEC2ImageID:
+    Type: String
+    Default: 'ami-01d514398745616a7'
+
+  EC2InstanceType:
+    Type: String
+    Default: 't3.xlarge'
+
+  EBSVolumeType:
+    Type: String
+    Default: 'gp2'
+
+  EBSVolumeSize:
+    Type: String
+    Default: 30
+
+  CertificateArn:
+    Type: String
+    Default: 'CertificateARN'
+
+  Route53ZoneName:
+    Type: String
+    Default: 'HostZoneName'
+
+  Route53RecordName:
+    Type: String
+    Default: 'RecordName'
+
+
+
+
+Conditions:
+  IsHTTPS: !Equals [ !Ref UseHTTPS, 'True' ]
+  IsNotHTTPS: !Not [ !Condition IsHTTPS ]
+
+
+
+
+
+Resources:
+  EC2LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: "EC2LaunchTemplate"
+      LaunchTemplateData:
+        ImageId: !Ref ECSOptimizedEC2ImageID # Set Amazon ECS-optimized AMI
+        InstanceType: !Ref EC2InstanceType
+        BlockDeviceMappings:
+          - Ebs:
+              VolumeType: !Ref EBSVolumeType
+              VolumeSize: !Ref EBSVolumeSize
+              DeleteOnTermination: True
+            DeviceName: "/dev/xvda"
+        NetworkInterfaces:
+          - AssociatePublicIpAddress: False
+            DeleteOnTermination: True
+            DeviceIndex: 0
+            Groups:
+              - !ImportValue
+                  Fn::Sub: "${SGStackName}-ECSSecurityGroupId"
+        IamInstanceProfile:
+          Name: !Ref "EC2InstanceProfile"
+        UserData: # Set Your ECS Cluster Name
+          Fn::Base64:
+            !Sub |
+              #!/bin/bash
+              echo "ECS_CLUSTER=ECSCluster" >> /etc/ecs/ecs.config
+
+  EC2InstanceRole: # Required to register EC2 as a container instance
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: "EC2InstanceRole"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - "sts:AssumeRole"
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role'
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - Ref: EC2InstanceRole
+
+  EC2AutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: "EC2AutoScalingGroup"
+      DesiredCapacity: "0" # Managed by ECS Capacity Provider
+      MinSize: "0"
+      MaxSize: "100"
+      MixedInstancesPolicy:
+        InstancesDistribution:
+          OnDemandBaseCapacity: 1 # Only one on-demand instance
+          OnDemandPercentageAboveBaseCapacity: 0
+        LaunchTemplate:
+          LaunchTemplateSpecification:
+            LaunchTemplateId: !GetAtt EC2LaunchTemplate.LaunchTemplateId
+            Version: !GetAtt EC2LaunchTemplate.LatestVersionNumber
+      AvailabilityZones:
+        - "ap-northeast-1a"
+        - "ap-northeast-1c"
+      VPCZoneIdentifier:
+        - !ImportValue
+            Fn::Sub: "${VPCStackName}-PrivateSubnetID1A"
+        - !ImportValue
+            Fn::Sub: "${VPCStackName}-PrivateSubnetID1C"
+      HealthCheckType: "ELB"
+      # Adding EC2 instances to the Target Group is not handled by the Auto Scaling Group, but by ECS.
+      # TargetGroupARNs:
+      #   - !GetAtt ALBTargetGroup.TargetGroupArn
+      CapacityRebalance: True
+      DefaultInstanceWarmup: 300
+      HealthCheckGracePeriod: 300
+      TerminationPolicies:
+        - ClosestToNextInstanceHour
+        - AllocationStrategy
+        - OldestInstance
+        - OldestLaunchTemplate
+      Tags:
+        - Key: "Name"
+          Value: "AutoScaledInstanceForECS"
+          PropagateAtLaunch: true
+
+  # Do not set the EC2 AutoScalingPolicy when using ECS Capacity Provider to auto-scale EC2.
+  # EC2AutoScalingPolicy:
+  #   Type: AWS::AutoScaling::ScalingPolicy
+  #   Properties:
+  #     AutoScalingGroupName: !Ref EC2AutoScalingGroup
+  #     PolicyType: "TargetTrackingScaling"
+  #     TargetTrackingConfiguration:
+  #       PredefinedMetricSpecification:
+  #         PredefinedMetricType: "ASGAverageCPUUtilization"
+  #       TargetValue: 50
+
+
+
+
+
+  ALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: "ALB"
+      Type: "application"
+      SecurityGroups:
+        - !ImportValue
+            Fn::Sub: "${SGStackName}-ALBSecurityGroupId"
+      Subnets:
+        - !ImportValue
+            Fn::Sub: "${VPCStackName}-PublicSubnetID1A"
+        - !ImportValue
+            Fn::Sub: "${VPCStackName}-PublicSubnetID1C"
+
+  ALBTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: "ALBTargetGroup"
+      HealthCheckIntervalSeconds: 60
+      HealthCheckPath: "/readme.html"
+      HealthCheckPort: "traffic-port" # If ECS is a bridge network, traffic-port setting is required
+      HealthCheckProtocol: "HTTP"
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 10
+      Matcher:
+        HttpCode: "200-299,301,302"
+      Port: 80
+      Protocol: "HTTP"
+      TargetGroupAttributes: # Configuration of load balancing, etc
+        - Key: "stickiness.enabled"
+          Value: False
+        - Key: "load_balancing.algorithm.type"
+          Value: "least_outstanding_requests"
+      TargetType: "instance" # If ECS network is bridge, specify instance
+      VpcId:
+        !ImportValue
+          Fn::Sub: "${VPCStackName}-VPCID"
+
+  # Need a second one for ECS Blue/Green Deployment
+  ALBTargetGroup2:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: "ALBTargetGroup2"
+      HealthCheckIntervalSeconds: 60
+      HealthCheckPath: "/readme.html"
+      HealthCheckPort: "traffic-port"
+      HealthCheckProtocol: "HTTP"
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 10
+      Matcher:
+        HttpCode: "200-299,301,302"
+      Port: 80
+      Protocol: "HTTP"
+      TargetGroupAttributes:
+        - Key: "stickiness.enabled"
+          Value: False
+        - Key: "load_balancing.algorithm.type"
+          Value: "least_outstanding_requests"
+      TargetType: "instance"
+      VpcId:
+        !ImportValue
+          Fn::Sub: "${VPCStackName}-VPCID"
+
+  ALBHTTPSListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Condition: IsHTTPS
+    Properties:
+      LoadBalancerArn: !Ref ALB
+      DefaultActions:
+        - Type: "forward"
+          TargetGroupArn: !GetAtt ALBTargetGroup.TargetGroupArn
+      Port: 443
+      Protocol: "HTTPS"
+      Certificates:
+        -   CertificateArn: !Ref CertificateArn
+      SslPolicy: "ELBSecurityPolicy-TLS13-1-2-2021-06"
+
+  ALBHTTPRedirect:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Condition: IsHTTPS
+    Properties:
+      LoadBalancerArn: !Ref ALB
+      DefaultActions:
+        - Type: "redirect"
+          RedirectConfig:
+            Protocol: "HTTPS"
+            Port: "443"
+            Host: "#{host}"
+            Path: "/#{path}"
+            Query: "#{query}"
+            StatusCode: "HTTP_301"
+      Port: 80
+      Protocol: "HTTP"
+
+  ALBHTTPListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Condition: IsNotHTTPS
+    Properties:
+      LoadBalancerArn: !Ref ALB
+      DefaultActions:
+        - Type: "forward"
+          TargetGroupArn: !GetAtt ALBTargetGroup.TargetGroupArn
+      Port: 80
+      Protocol: "HTTP"
+
+  # Alias settings for ALB when using HTTPS
+  Route53ALBAlias:
+    Type: AWS::Route53::RecordSet
+    Condition: IsHTTPS
+    Properties: 
+      AliasTarget:
+        DNSName: !GetAtt ALB.DNSName
+        HostedZoneId: !GetAtt ALB.CanonicalHostedZoneID
+        EvaluateTargetHealth: false
+      HostedZoneName: !Ref Route53ZoneName
+      Name: !Ref Route53RecordName
+      Type: "A"
+
+
+
+
+
+# To obtain the EC2 AutoScalingGroupARN required for ECS configuration
+  LambdaGetASGArn:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: "index.handler"
+      Role: !GetAtt LambdaASGIAMRole.Arn
+      Runtime: "python3.10"
+      Timeout: 300
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+          def handler(event, context):
+              try:
+                  client = boto3.client('autoscaling')
+                  response = client.describe_auto_scaling_groups(AutoScalingGroupNames=[event['ResourceProperties']['ASGName']])
+                  arn = response['AutoScalingGroups'][0]['AutoScalingGroupARN']
+                  responseData = {}
+                  responseData['ASGArn'] = arn
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData)
+              except Exception as e:
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {"Error": str(e)})
+
+  InvokeLambdaGetASGArn:
+    Type: "Custom::ASGArn"
+    Properties:
+      ServiceToken: !GetAtt LambdaGetASGArn.Arn
+      ASGName: !Ref EC2AutoScalingGroup # Start Lambda after ASG is created
+
+  LambdaASGIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: "LambdaASGIAMPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - autoscaling:*
+                Resource: "*"
+
+
+
+
+
+Outputs:
+  ALBArn:
+    Value: !Ref ALB
+    Export:
+      Name: !Sub "${AWS::StackName}-ALBArn"
+
+  ALBDNSName:
+    Value: !GetAtt ALB.DNSName
+    Export:
+      Name: !Sub "${AWS::StackName}-ALBDNSName"
+
+  ALBTargetGroupArn:
+    Value: !GetAtt ALBTargetGroup.TargetGroupArn
+    Export:
+      Name: !Sub "${AWS::StackName}-ALBTargetGroupArn"
+
+  ALBTargetGroup2Arn:
+    Value: !GetAtt ALBTargetGroup2.TargetGroupArn
+    Export:
+      Name: !Sub "${AWS::StackName}-ALBTargetGroup2Arn"
+
+  ALBTargetGroupName:
+    Value: !GetAtt ALBTargetGroup.TargetGroupName
+    Export:
+      Name: !Sub "${AWS::StackName}-ALBTargetGroupName"
+
+  ALBTargetGroup2Name:
+    Value: !GetAtt ALBTargetGroup2.TargetGroupName
+    Export:
+      Name: !Sub "${AWS::StackName}-ALBTargetGroup2Name"
+
+  ALBHTTPSListenerArn:
+    Condition: IsHTTPS
+    Value: !GetAtt ALBHTTPSListener.ListenerArn
+    Export:
+      Name: !Sub "${AWS::StackName}-ALBListenerArn"
+
+  ALBHTTPListenerArn:
+    Condition: IsNotHTTPS
+    Value: !GetAtt ALBHTTPListener.ListenerArn
+    Export:
+      Name: !Sub "${AWS::StackName}-ALBListenerArn"
+
+  EC2AutoScalingGroupName:
+    Value: !Ref EC2AutoScalingGroup
+    Export:
+      Name: !Sub "${AWS::StackName}-EC2AutoScalingGroupName"
+
+  EC2AutoScalingGroupARN:
+    Value: !GetAtt InvokeLambdaGetASGArn.ASGArn
+    Export:
+      Name: !Sub "${AWS::StackName}-EC2AutoScalingGroupARN"

@@ -1,0 +1,73 @@
+{
+  "family": "ECSTaskDefinition",
+  "executionRoleArn": "<EXECUTION_ROLE>",
+  "taskRoleArn": "<TASK_ROLE>",
+  "networkMode": "bridge",
+  "runtimePlatform": { "operatingSystemFamily": "LINUX" },
+  "requiresCompatibilities": ["EC2"],
+  "cpu": "1024",
+  "memory": "2048",
+  "volumes": [
+    {
+      "name": "EFSVolume",
+      "efsVolumeConfiguration": {
+        "fileSystemId": "<EFS_ID>",
+        "rootDirectory": "/"
+      }
+    }
+  ],
+  "containerDefinitions": [
+    {
+      "name": "wordpress-container",
+      "image": "<IMAGE_NAME>",
+      "cpu": 1024,
+      "memory": 2048,
+      "portMappings": [
+        {
+          "containerPort": 80
+        }
+      ],
+      "mountPoints": [
+        {
+          "sourceVolume": "EFSVolume",
+          "containerPath": "/var/www/html"
+        }
+      ],
+      "environment": [
+        {
+          "name": "WORDPRESS_DB_HOST",
+          "value": "<RDS_ENDPOINT>"
+        },
+        {
+          "name": "WORDPRESS_DB_USER",
+          "value": "wordpress_db_user"
+        },
+        {
+          "name": "WORDPRESS_DB_NAME",
+          "value": "wordpress_db"
+        }
+      ],
+      "secrets": [
+        {
+          "name": "WORDPRESS_DB_PASSWORD",
+          "valueFrom": "<RDS_SECRETS>:password::"
+        }
+      ],
+      "healthCheck": {
+        "command": [ "CMD-SHELL", "curl -f http://localhost/ || exit 1" ],
+        "startPeriod": 60
+      },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-region": "ap-northeast-1",
+          "awslogs-group": "ECS-Stack-ECSTaskLogs",
+          "awslogs-stream-prefix": "wordpress-container"
+        }
+      },
+      "linuxParameters": {
+        "initProcessEnabled": true
+      }
+    }
+  ]
+}

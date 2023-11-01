@@ -1,0 +1,178 @@
+# Create a [VPC-Stack] and [SG-Stack], [RDS-Stack], [EFS-Stack]in advance
+# Create a stack with the name [ECR-CodeCommitBuild-Stack]
+
+# AWS resources to be built
+# ・ECR
+# ・CodeCommit
+# ・CodeBuild
+# ・CloudWatchLogs(For CodeBuild)
+
+Parameters:
+  VPCStackName:
+    Type: String
+    Default: 'VPC-Stack'
+
+  SGStackName:
+    Type: String
+    Default: 'SG-Stack'
+
+  RDSStackName:
+    Type: String
+    Default: 'RDS-Stack'
+
+  EFSStackName:
+    Type: String
+    Default: 'EFS-Stack'
+
+  MainBranchName:
+    Type: String
+    Default: 'master'
+
+
+
+
+
+Resources:
+  ECR:
+    Type: AWS::ECR::Repository
+    Properties: 
+      RepositoryName: "wordpress"
+      EmptyOnDelete: True
+      ImageScanningConfiguration: 
+          ScanOnPush: True
+      LifecyclePolicy: 
+        LifecyclePolicyText: '{
+          "rules": [
+            {
+              "rulePriority": 1,
+              "description": "Keep only the last 10 images",
+              "selection": {
+                "tagStatus": "any",
+                "countType": "imageCountMoreThan",
+                "countNumber": 10
+              },
+              "action": {
+                "type": "expire"
+              }
+            }
+          ]
+        }'
+
+  CodeCommit:
+    Type: AWS::CodeCommit::Repository
+    Properties: 
+      RepositoryName: "wordpress-repo"
+
+  CodeBuild:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: "wordpress-codebuild"
+      ServiceRole: !Ref CodeBuildIAMRole
+      Source:
+        Type: "CODECOMMIT"
+        Location: !GetAtt CodeCommit.CloneUrlHttp
+      SourceVersion:
+        !Sub "refs/heads/${MainBranchName}"
+      Artifacts:
+        Type: "NO_ARTIFACTS" # Manual Execution Settings. When executing from CodePipeline, configure in CodePipeline.
+      Environment:
+        Type: "LINUX_CONTAINER"
+        ComputeType: "BUILD_GENERAL1_SMALL"
+        Image: "aws/codebuild/amazonlinux2-x86_64-standard:5.0"
+        PrivilegedMode: True
+        EnvironmentVariables:
+          - Name: "ECR_URI"
+            Type: "PLAINTEXT"
+            Value: !GetAtt ECR.RepositoryUri
+          - Name: "EFSID"
+            Value:
+              !ImportValue
+                Fn::Sub: "${EFSStackName}-EFSFileSystemID"
+          - Name: "RDSENDPOINT"
+            Value:
+              !ImportValue
+                Fn::Sub: "${RDSStackName}-RDSClusterWriteEndpoint"
+          - Name: "RDSSECRETS"
+            Value:
+              !ImportValue
+                Fn::Sub: "${RDSStackName}-RDSClusterMasterUserPassword"
+      LogsConfig:
+        CloudWatchLogs:
+            GroupName: !Ref CodeBuildClousWatchLogs
+            Status: "ENABLED"
+      VpcConfig: # There is also a managed method that does not use VPC.
+        VpcId:
+          Fn::ImportValue: 
+            !Sub "${VPCStackName}-VPCID"
+        Subnets:
+          - !ImportValue
+              Fn::Sub: "${VPCStackName}-PrivateSubnetID1A"
+          - !ImportValue
+              Fn::Sub: "${VPCStackName}-PrivateSubnetID1C"
+        SecurityGroupIds:
+          - !ImportValue
+              Fn::Sub: "${SGStackName}-CodeBuildSecurityGroupId"
+
+  CodeBuildIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: "CodeBuildIAMRole"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - "sts:AssumeRole"
+            Principal:
+              Service:
+                - codebuild.amazonaws.com
+      Policies:
+        - PolicyName: "CodeBuildIAMPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "codecommit:*"
+                  - "codebuild:*"
+                  - "ecr:*"
+                  - "logs:*"
+                  - "s3:*"
+                  - "ec2:*"
+                Resource: "*"
+
+  CodeBuildClousWatchLogs:
+    Type: AWS::Logs::LogGroup
+    Properties: 
+      LogGroupName: !Sub "${AWS::StackName}-CodeBuildClousWatchLogs"
+      RetentionInDays: 1
+
+
+
+
+
+Outputs:
+  ECRArn:
+    Value: !GetAtt ECR.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-ECRArn"
+
+  ECRRepositoryUri:
+    Value: !GetAtt ECR.RepositoryUri
+    Export:
+      Name: !Sub "${AWS::StackName}-ECRRepositoryUri"
+
+  CodeCommitName:
+    Value: !GetAtt CodeCommit.Name
+    Export:
+      Name: !Sub "${AWS::StackName}-CodeCommitName"
+
+  CodeCommitRepositoryARN:
+    Value: !GetAtt CodeCommit.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-CodeCommitRepositoryARN"
+
+  CodeBuildName:
+    Value: !Ref CodeBuild
+    Export:
+      Name: !Sub "${AWS::StackName}-CodeBuildName"

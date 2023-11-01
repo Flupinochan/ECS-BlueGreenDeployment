@@ -68,9 +68,7 @@ Resources:
               InputArtifacts:
                 - Name: "SourceArtifacts"
               OutputArtifacts:
-                - Name: "BuildArtifact1"
-                - Name: "BuildArtifact2"
-                - Name: "BuildArtifact3"
+                - Name: "BuildArtifacts"
         - Name: "Deploy"
           Actions:
             - Name: "Deploy"
@@ -82,18 +80,14 @@ Resources:
               Configuration:
                 ApplicationName: !Ref CodeDeployApplication
                 DeploymentGroupName: !Ref CodeDeployDeploymentGroup
-                TaskDefinitionTemplateArtifact: "BuildArtifact1"
+                TaskDefinitionTemplateArtifact: "BuildArtifacts"
                 TaskDefinitionTemplatePath: "taskdef.json"
-                AppSpecTemplateArtifact: "BuildArtifact1"
+                AppSpecTemplateArtifact: "BuildArtifacts"
                 AppSpecTemplatePath: "appspec.yaml"
-                Image1ArtifactName: 'BuildArtifact2'
-                Image1ContainerName: 'PHP_IMAGE'
-                Image2ArtifactName: 'BuildArtifact3'
-                Image2ContainerName: 'NGINX_IMAGE'
+                Image1ArtifactName: 'BuildArtifacts'
+                Image1ContainerName: 'IMAGE_NAME'
               InputArtifacts:
-                - Name: "BuildArtifact1"
-                - Name: "BuildArtifact2"
-                - Name: "BuildArtifact3"
+                - Name: "BuildArtifacts"
 
   CodeDeployApplication:
     Type: AWS::CodeDeploy::Application
@@ -223,7 +217,6 @@ Resources:
     Properties:
       ServiceToken: !GetAtt LambdaDeleteS3Object.Arn
       BucketName: !Ref CodePipelineS3
-
 
 
 

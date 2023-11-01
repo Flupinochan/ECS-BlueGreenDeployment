@@ -1,0 +1,351 @@
+# Create a [VPC-Stack] and [SG-Stack], [RDS-Stack], [EFS-Stack], [ECR-CodeCommitBuild-Stack], [ALB-Stack] in advance
+# Create a stack with the name [ECS-Stack]
+
+# ★Caution
+# [ECS-Stack] deletion always fails.
+# When deleting [ECS-Stack], ECS Cluster is set to 「retain」.
+# Delete [ALB-Stack] first, then manually delete ECS Cluster.
+
+# AWS resources to be built
+# ・ECS Cluster
+# ・ECS CapacityProvider
+# ・ECS TaskDefinition
+# ・ECS Service
+# ・ECS AutoScaling
+# ・CloudWatchLogs(For ECS)
+
+Parameters:
+  VPCStackName:
+    Type: String
+    Default: 'VPC-Stack'
+
+  SGStackName:
+    Type: String
+    Default: 'SG-Stack'
+
+  RDSStackName:
+    Type: String
+    Default: 'RDS-Stack'
+
+  EFSStackName:
+    Type: String
+    Default: 'EFS-Stack'
+
+  ECRCodeCommitBuildStackStackName:
+    Type: String
+    Default: 'ECR-CodeCommitBuild-Stack'
+
+  ALBStackName:
+    Type: String
+    Default: 'ALB-Stack'
+
+  Prefix:
+    Type: String
+    Default: ':password::'
+    NoEcho: true
+
+
+
+
+
+Resources:
+  ECSCapacityProviderEC2:
+    Type: AWS::ECS::CapacityProvider
+    Properties:
+      Name: "CapacityProviderECSonEC2"
+      AutoScalingGroupProvider:
+        AutoScalingGroupArn:
+          !ImportValue
+            Fn::Sub: "${ALBStackName}-EC2AutoScalingGroupARN"
+        ManagedScaling:
+          Status: "ENABLED"
+          TargetCapacity: 75 # CapacityProviderReservation
+# 1分内の1データポイントのCapacityProviderReservation > 75
+# 15分内の15データポイントのCapacityProviderReservation < 75
+
+# Initial ECS Cluster creation always fails
+# ECS Cluster deletion is possible when there is no container instance
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: "ECSCluster"
+      ClusterSettings:
+        - Name: "containerInsights"
+          Value: "enabled"
+      Configuration:
+        ExecuteCommandConfiguration:
+          LogConfiguration:
+            CloudWatchLogGroupName: !Ref ECSExecClousWatchLogs
+          Logging: "OVERRIDE"
+
+  ECSClusterCapacityProviderAssociations:
+    Type: AWS::ECS::ClusterCapacityProviderAssociations
+    Properties:
+      Cluster: !Ref ECSCluster
+      CapacityProviders:
+        - !Ref ECSCapacityProviderEC2
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: !Ref ECSCapacityProviderEC2
+          Base: 1
+          Weight: 1
+
+# For initial TaskDefinition
+# Updated by CodeDeploy(taskdef.json, imageDetail.json)
+# The CPU and memory configurations should be specified as follows: at the task level, they should be in string format, while in the containerDefinitions section, they should be in numeric format.
+  ECSTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: "ECSTaskDefinition"
+      ExecutionRoleArn: !GetAtt ECSExecutionIAMRole.Arn
+      TaskRoleArn: !GetAtt ECSTaskIAMRole.Arn
+      Cpu: "2048"
+      Memory: "4096"
+      NetworkMode: "awsvpc"
+      RuntimePlatform:
+        OperatingSystemFamily: "LINUX"
+      Volumes:
+        - Name: "EFSVolume"
+          EFSVolumeConfiguration:
+            FilesystemId:
+              !ImportValue
+                Fn::Sub: "${EFSStackName}-EFSFileSystemID"
+            RootDirectory: "/"
+      RequiresCompatibilities:
+        - "EC2"
+      ContainerDefinitions:
+        - Name: "php-container"
+          Image: 
+            !ImportValue
+              Fn::Sub: "${ECRCodeCommitBuildStackStackName}-ECRForPHPRepositoryUri"
+          Cpu: 1024
+          Memory: 2048
+          MountPoints:
+            - SourceVolume: "EFSVolume"
+              ContainerPath: "/var/www/html"
+          Environment:
+            - Name: WORDPRESS_DB_HOST
+              Value:
+                !ImportValue
+                  Fn::Sub: "${RDSStackName}-RDSClusterWriteEndpoint"
+            - Name: WORDPRESS_DB_USER
+              Value:
+                !ImportValue
+                  Fn::Sub: "${RDSStackName}-RDSClusterMasterUsername"
+            - Name: WORDPRESS_DB_NAME
+              Value:
+                !ImportValue
+                  Fn::Sub: "${RDSStackName}-RDSClusterDatabaseName"
+          Secrets: # Use Secrets Manager
+            - Name: "WORDPRESS_DB_PASSWORD"
+              ValueFrom:
+                Fn::Sub:
+                  - "${SecretARN}${Prefix}"
+                  - SecretARN:
+                      Fn::ImportValue:
+                        !Sub "${RDSStackName}-RDSClusterMasterUserPassword"
+                    Prefix: !Ref Prefix
+          HealthCheck:
+            Command:
+              - "CMD-SHELL"
+              - "php -r 'echo \"Healthy\";' || exit 1"
+            StartPeriod: 60
+          LogConfiguration:
+            LogDriver: "awslogs"
+            Options:
+              awslogs-region: "ap-northeast-1"
+              awslogs-group: !Ref ECSTaskLogs
+              awslogs-stream-prefix: "php-container"
+          LinuxParameters: # Required for ECS Exec
+            InitProcessEnabled: true
+        - Name: "nginx-container"
+          Image: 
+            !ImportValue
+              Fn::Sub: "${ECRCodeCommitBuildStackStackName}-ECRForNginxRepositoryUri"
+          Cpu: 1024
+          Memory: 2048
+          PortMappings:
+            - ContainerPort: 80
+          MountPoints:
+            - SourceVolume: "EFSVolume"
+              ContainerPath: "/var/www/html"
+          DependsOn: # If the php-container succeeds in the health check, the nginx-container will be started
+            - Condition: "HEALTHY"
+              ContainerName: "php-container"
+          HealthCheck:
+            Command:
+              - "CMD-SHELL"
+              - "curl -f http://localhost/readme.html || exit 1"
+            StartPeriod: 60
+          LogConfiguration:
+            LogDriver: "awslogs"
+            Options:
+              awslogs-region: "ap-northeast-1"
+              awslogs-group: !Ref ECSTaskLogs
+              awslogs-stream-prefix: "nginx-container"
+          LinuxParameters: 
+            InitProcessEnabled: true
+
+
+
+
+
+# Updated by CodeDeploy(appspec.yaml)
+  ECSService:
+    Type: AWS::ECS::Service
+    Properties: 
+      ServiceName: "ECSService"
+      Cluster: !Ref ECSCluster
+      TaskDefinition: !Ref ECSTaskDefinition
+      DeploymentController:
+          Type: "ECS" # Use Rolling Updates. CodeDeploy does not support Rolling Updates.
+      CapacityProviderStrategy:
+        - CapacityProvider: !Ref ECSCapacityProviderEC2
+          Base: 2
+          Weight: 1
+      DesiredCount: 4
+      EnableExecuteCommand: true # ECS exec Allow
+      HealthCheckGracePeriodSeconds: 60
+      LoadBalancers:
+        - TargetGroupArn:
+            !ImportValue
+              Fn::Sub: "${ALBStackName}-ALBTargetGroupArn"
+          ContainerName: "nginx-container"
+          ContainerPort: 80
+      PlacementStrategies:
+        - Field: "attribute:ecs.availability-zone" # Redundant configuration between 2AZ
+          Type: "spread"
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 50
+        MaximumPercent: 200
+      NetworkConfiguration: # It's necessary for awsvpc
+        AwsvpcConfiguration:
+          AssignPublicIp: 'DISABLED'
+          SecurityGroups: 
+            - !ImportValue
+                Fn::Sub: "${SGStackName}-ECSSecurityGroupId"
+          Subnets: 
+            - !ImportValue
+                Fn::Sub: "${VPCStackName}-PrivateSubnetID1A"
+            - !ImportValue
+                Fn::Sub: "${VPCStackName}-PrivateSubnetID1C"
+
+  ECSServiceAutoScalableTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: 12
+      MinCapacity: 4
+      ResourceId: !Join 
+        - /
+        - - service
+          - !Ref ECSCluster
+          - !GetAtt ECSService.Name
+      RoleARN: !GetAtt ECSServiceAutoScalingIAMRole.Arn
+      ScalableDimension: "ecs:service:DesiredCount"
+      ServiceNamespace: "ecs"
+
+  ECSServiceAutoScalingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: "ECSServiceAutoScalingPolicy"
+      PolicyType: "TargetTrackingScaling"
+      ScalingTargetId: !Ref ECSServiceAutoScalableTarget
+      TargetTrackingScalingPolicyConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: "ECSServiceAverageCPUUtilization"
+        ScaleInCooldown: 120
+        ScaleOutCooldown: 300
+        TargetValue: 80
+
+
+
+
+
+  ECSExecClousWatchLogs:
+    Type: AWS::Logs::LogGroup
+    Properties: 
+      LogGroupName: !Sub "${AWS::StackName}-ECSExecClousWatchLogs"
+      RetentionInDays: 1
+
+  ECSTaskLogs:
+    Type: AWS::Logs::LogGroup
+    Properties: 
+      LogGroupName: !Sub "${AWS::StackName}-ECSTaskLogs"
+      RetentionInDays: 1
+
+  ECSExecutionIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: "ECSExecutionIAMRole"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - "sts:AssumeRole"
+            Principal:
+              Service:
+                - ecs-tasks.amazonaws.com
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy'
+      Policies: 
+        - PolicyName: "SecretsManagerAccessPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement: 
+              - Effect: "Allow"
+                Action: 
+                  - "secretsmanager:GetSecretValue"
+                  - "kms:Decrypt"
+                Resource: "*"
+
+  ECSTaskIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: "ECSTaskIAMRole"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - "sts:AssumeRole"
+            Principal:
+              Service:
+                - ecs-tasks.amazonaws.com
+      Policies:
+        - PolicyName: "ECSExecIAMPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "ssmmessages:*"
+                Resource: "*"
+
+  ECSServiceAutoScalingIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: "ECSServiceAutoScalingIAMRole"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - "sts:AssumeRole"
+            Principal:
+              Service:
+                - ecs.application-autoscaling.amazonaws.com
+      Policies:
+        - PolicyName: "ECSServiceAutoScalingIAMPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "application-autoscaling:*"
+                  - "ecs:DescribeServices"
+                  - "ecs:UpdateService"
+                  - "cloudwatch:*"
+                  - "iam:CreateServiceLinkedRole"
+                  - "sns:*"
+                Resource:
+                  - "*"

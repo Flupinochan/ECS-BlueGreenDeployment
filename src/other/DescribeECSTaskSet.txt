@@ -1,0 +1,9 @@
+★TaskSetは、CLIでしか確認できない
+　CodeDeployによるBlue/Green Deploymentを行わず、手動でTaskSetを扱うことでもできるらしいが、あまり使わなそう
+
+・ECS TaskSetIDを確認
+aws ecs describe-services --cluster ECSCluster --services ECSService
+
+・ECS TaskSetの情報を確認
+aws ecs describe-task-sets --cluster ECSCluster --service ECSService --task-sets <TaskSetID>
+(例)aws ecs describe-task-sets --cluster ECSCluster --service ECSService --task-sets ecs-svc/2773216218714190857

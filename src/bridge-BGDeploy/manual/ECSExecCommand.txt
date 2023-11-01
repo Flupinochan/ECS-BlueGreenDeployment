@@ -1,0 +1,61 @@
+★ECS Exec コマンドの例です
+※CloudShellがオススメです
+
+■基本コマンド
+・既存のECS Seriviceで、ECSexecが有効かどうか確認
+aws ecs describe-services \
+--cluster ECSCluster \
+--services ECSService | grep enableExecuteCommand
+
+・既存のECS Serviceに対し、ECSexecを有効化 (無効の場合、タスクは手動で停止させ、再作成されたものから有効になります)
+※ECS Service作成時に有効化しているため、基本的に不要です
+aws ecs update-service \
+--cluster ECSCluster \
+--service ECSService \
+--enable-execute-command
+
+・ECS Cluster内のタスクARNを一覧取得
+aws ecs list-tasks --cluster ECSCluster
+
+・bash起動
+※タスクARNもしくは、タスクIDに置き換えてください
+aws ecs execute-command \
+--cluster ECSCluster \
+--task <タスクARN or ID> \
+--container nginx-container \
+--interactive \
+--command "/bin/bash"
+
+・抜けたい
+exit コマンドを実行
+
+
+■実行例
+例 : nginxコンテナに入る
+aws ecs execute-command \
+--cluster ECSCluster \
+--task arn:aws:ecs:ap-northeast-1:アカウントID:task/ECSCluster/2fc5a1a68a114c16a148299ff48b3204 \
+--container nginx-container \
+--interactive \
+--command "/bin/bash"
+
+例 : マウントしているefsを確認
+ls -l /var/www/html
+
+例 : 起動しているnginxのステータスを確認
+/etc/init.d/nginx status
+
+
+例 : phpコンテナに入る
+aws ecs execute-command \
+--cluster ECSCluster \
+--task arn:aws:ecs:ap-northeast-1:アカウントID:task/ECSCluster/2fc5a1a68a114c16a148299ff48b3204 \
+--container php-container \
+--interactive \
+--command "/bin/bash"
+
+例 : マウントしているefsを確認
+ls -l /var/www/html
+
+例 : phpが使用できることを確認
+php /var/www/html/index.php

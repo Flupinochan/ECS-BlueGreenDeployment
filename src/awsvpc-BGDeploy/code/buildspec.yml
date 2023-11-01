@@ -6,8 +6,8 @@ phases:
       - ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
       - aws --region $AWS_DEFAULT_REGION ecr get-login-password | docker login --username AWS --password-stdin $ECRFORPHP_URI
       - aws --region $AWS_DEFAULT_REGION ecr get-login-password | docker login --username AWS --password-stdin $ECRFORNGINX_URI
-      - TaskRoleARN="arn:aws:iam::${ACCOUNT_ID}:role/ECSTaskIAMRole" 
-      - TaskExecutionRoleARN="arn:aws:iam::${ACCOUNT_ID}:role/ECSExecutionIAMRole" 
+      - TaskRoleARN="arn:aws:iam::${ACCOUNT_ID}:role/ECSTaskIAMRole"
+      - TaskExecutionRoleARN="arn:aws:iam::${ACCOUNT_ID}:role/ECSExecutionIAMRole"
       - sed -i -e s@\<TASK_ROLE\>@$TaskRoleARN@ taskdef.json
       - sed -i -e s@\<EXECUTION_ROLE\>@$TaskExecutionRoleARN@ taskdef.json
       - sed -i -e s@\<RDS_ENDPOINT\>@$RDSENDPOINT@ taskdef.json

@@ -1,6 +1,8 @@
 # ★Caution
 # It costs quite a bit of money, so please remove it as soon as you are done verifying it!
 
+## https://youtu.be/kzygrdNEGPs?si=-ho-VYZ8pINzpufA
+
 0. Create an IAM Role to create the stack in CloudFormation<br>
    If you put an AdministratorAccess policy on it, there is no problem
 1. Create a CloudFormation Stack named [VPC-Stack]
@@ -12,7 +14,7 @@
 6. Create a CloudFormation Stack named [ECR-CodeCommitBuild-Stack]
 7. Upload code to CodeCommit<br>
     ※Please refer to the [UploadCodeToCodeCommit.txt] manual
-8. Create a ECS Images
+8. Create a ECS Images<br>
     ※In the AWS Management Console (CodeBuild), select the [wordpress-codebuild] project and run build to create the ECS image
 9. Create a CloudFormation Stack named [ALB-Stack]
 10. Create a CloudFormation Stack named [ECS-Stack]<br>

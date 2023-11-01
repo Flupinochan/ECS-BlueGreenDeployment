@@ -1,0 +1,22 @@
+ご自身でEC2等のサーバを構築し、wordpressコンテンツをEFSにアップロードしてください
+★Caution
+　EC2を構築する際は、EFSにアクセスが可能な[ECS-SG]セキュリティグループを割り当ててください
+　SSM接続する場合は、EC2に[AmazonSSMManagedInstanceCore]IAMポリシーを割り当てたIAMロールを使用してください
+　Protected Subnet以外で構築してください
+
+下記からwordpressのコンテンツがダウンロードできます
+https://ja.wordpress.org/download/releases/
+
+■例 version : 6.3.1
+EC2でEFSをマウントし、wordpressコンテンツをEFSにコピーする
+※「fs-0806e4ac789bd6939」は、作成したEFSのファイルシステムIDに合わせてください
+
+sudo -s
+yum install -y amazon-efs-utils
+cd /tmp
+mkdir /tmp/EFS-Wordpress
+mount -t efs fs-0806e4ac789bd6939:/ /tmp/EFS-Wordpress
+wget https://ja.wordpress.org/wordpress-6.3.1-ja.tar.gz
+tar zxvf wordpress-6.3.1-ja.tar.gz
+chmod -R 777 wordpress
+cp -Rp wordpress/* /tmp/EFS-Wordpress

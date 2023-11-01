@@ -1,0 +1,19 @@
+version: 0.2
+
+phases:
+  pre_build:
+    commands:
+      - aws --region $AWS_DEFAULT_REGION ecr get-login-password | docker login --username AWS --password-stdin $ECRFORPHP_URI
+      - aws --region $AWS_DEFAULT_REGION ecr get-login-password | docker login --username AWS --password-stdin $ECRFORNGINX_URI
+
+  build:
+    commands:
+      - docker build -t php:latest -f Dockerfile_php .
+      - docker tag php:latest $ECRFORPHP_URI:latest
+      - docker build -t nginx:latest -f Dockerfile_nginx .
+      - docker tag nginx:latest $ECRFORNGINX_URI:latest
+
+  post_build:
+    commands:
+      - docker push $ECRFORPHP_URI:latest
+      - docker push $ECRFORNGINX_URI:latest

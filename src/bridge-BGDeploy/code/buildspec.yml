@@ -1,0 +1,30 @@
+version: 0.2
+
+phases:
+  pre_build:
+    commands:
+      - ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+      - aws --region $AWS_DEFAULT_REGION ecr get-login-password | docker login --username AWS --password-stdin $ECR_URI
+      - TaskRoleARN="arn:aws:iam::${ACCOUNT_ID}:role/ECSTaskIAMRole"
+      - TaskExecutionRoleARN="arn:aws:iam::${ACCOUNT_ID}:role/ECSExecutionIAMRole"
+      - sed -i -e s@\<TASK_ROLE\>@$TaskRoleARN@ taskdef.json
+      - sed -i -e s@\<EXECUTION_ROLE\>@$TaskExecutionRoleARN@ taskdef.json
+      - sed -i -e s@\<RDS_ENDPOINT\>@$RDSENDPOINT@ taskdef.json
+      - sed -i -e s@\<RDS_SECRETS\>@$RDSSECRETS@ taskdef.json
+      - sed -i -e s@\<EFS_ID\>@$EFSID@ taskdef.json
+
+  build:
+    commands:
+      - docker build -t wordpress:latest .
+      - docker tag wordpress:latest $ECR_URI:latest
+
+  post_build:
+    commands:
+      - docker push $ECR_URI:latest
+      - printf '{"ImageURI":"%s:latest"}' $ECR_URI > imageDetail.json
+
+artifacts:
+  files:
+    - imageDetail.json
+    - taskdef.json
+    - appspec.yaml

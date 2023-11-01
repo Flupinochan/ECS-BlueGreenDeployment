@@ -1,0 +1,10 @@
+cloudformation書式チェック手順 (最新バージョンに対応していないこともあるので目安程度にしかならない…)
+
+・CloudFormation Linter
+curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py
+python3 get-pip.py
+pip install cfn-lint
+cfn-lint CloudFormationテンプレートファイル名
+
+・AWS CLI validate-template ※file://と始めることに注意する!!
+aws cloudformation validate-template --template-body file://ファイル名

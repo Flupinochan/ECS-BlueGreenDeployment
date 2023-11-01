@@ -1,0 +1,321 @@
+# Create a [VPC-Stack] and [SG-Stack], [ALB-Stack], [EFS-Stack], [RDS-Stack], [ECR-CodeCommitBuild-Stack]in advance
+# Create a stack with the name [ECS-Stack]
+
+# The environment variables within the ECSTaskDefinition are hard-coded. Therefore, it is recommended to manage these values using services like AWS Secrets Manager.
+
+# ★Caution
+# For ECS based on EC2, you cannot define an ECSTaskSet in CloudFormation when performing Blue/Green deployments using CodeDeploy. 
+# However, for Fargate-based ECS, you can define ECSTaskSet along with Hooks in CloudFormation, 
+# allowing you to perform Blue/Green deployments based on CloudFormation.
+
+Parameters:
+  EFSStackName:
+    Type: String
+    Default: 'EFS-Stack'
+
+  ECRCodeCommitBuildStackStackName:
+    Type: String
+    Default: 'ECR-CodeCommitBuild-Stack'
+
+  RDSStackName:
+    Type: String
+    Default: 'RDS-Stack'
+
+  ALBStackName:
+    Type: String
+    Default: 'ALB-Stack'
+
+  AutoScalingGroupARN:
+    Type: String
+    MinLength: 1
+
+
+
+
+
+# The AWS::CodeDeployBlueGreen can only be used with FARGATE.
+# Transform:
+#   - AWS::CodeDeployBlueGreen
+# Hooks:
+#   CodeDeployBlueGreenHook:
+#     Type: AWS::CodeDeploy::BlueGreen
+#     Properties:
+#       TrafficRoutingConfig:
+#         Type: AllAtOnce
+#       Applications:
+#         - Target:
+#             Type: AWS::ECS::Service
+#             LogicalID: ECSService
+#           ECSAttributes:
+#             TaskDefinitions:
+#               - ECSTaskDefinition
+#               - GreenTaskDefinition
+#             TaskSets:
+#               - ECSTaskSet
+#               - GreenTaskSet
+#             TrafficRouting:
+#               ProdTrafficRoute:
+#                 Type: AWS::ElasticLoadBalancingV2::Listener
+#                 LogicalID: ALBHTTPListener
+#               TargetGroups:
+#                 - ALBTargetGroup
+#                 - ALBTargetGroup2
+
+
+
+
+
+Resources:
+  ECSCapacityProviderEC2:
+    Type: AWS::ECS::CapacityProvider
+    Properties:
+      Name: "CapacityProviderECSonEC2"
+      AutoScalingGroupProvider:
+        AutoScalingGroupArn: !Ref AutoScalingGroupARN
+        ManagedScaling:
+          Status: "ENABLED"
+          MinimumScalingStepSize: 1
+
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: "ECSCluster"
+      ClusterSettings:
+        - Name: "containerInsights"
+          Value: "enabled"
+      Configuration:
+        ExecuteCommandConfiguration:
+          LogConfiguration:
+            CloudWatchLogGroupName: !Ref ECSExecClousWatchLogs
+          Logging: "OVERRIDE"
+
+  ECSClusterCapacityProviderAssociations:
+    Type: AWS::ECS::ClusterCapacityProviderAssociations
+    Properties:
+      Cluster: !Ref ECSCluster
+      CapacityProviders:
+        - !Ref ECSCapacityProviderEC2
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: !Ref ECSCapacityProviderEC2
+          Base: 1
+          Weight: 1
+
+# For initial TaskDefinition
+# Updated by CodeDeploy(taskdef.json, imageDetail.json)
+# The CPU and memory configurations should be specified as follows: at the task level, they should be in string format, while in the containerDefinitions section, they should be in numeric format.
+  ECSTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: "ECSTaskDefinition"
+      ExecutionRoleArn: !GetAtt ECSExecutionIAMRole.Arn
+      TaskRoleArn: !GetAtt ECSTaskIAMRole.Arn
+      Cpu: "1024"
+      Memory: "2048"
+      NetworkMode: "bridge"
+      RuntimePlatform:
+        OperatingSystemFamily: "LINUX"
+      Volumes:
+        - Name: "EFSVolume"
+          EFSVolumeConfiguration:
+            FilesystemId:
+              !ImportValue
+                Fn::Sub: "${EFSStackName}-EFSFileSystemID"
+            RootDirectory: "/"
+      RequiresCompatibilities:
+        - "EC2"
+      ContainerDefinitions:
+        - Name: "wordpress-container"
+          Image: 
+            !ImportValue
+              Fn::Sub: "${ECRCodeCommitBuildStackStackName}-ECRRepositoryUri"
+          Cpu: 1024
+          Memory: 2048
+          PortMappings:
+            - ContainerPort: 80
+          MountPoints:
+            - SourceVolume: "EFSVolume"
+              ContainerPath: "/var/www/html"
+          Environment:
+            - Name: WORDPRESS_DB_HOST
+              Value:
+                !ImportValue
+                  Fn::Sub: "${RDSStackName}-RDSClusterWriteEndpoint"
+            - Name: WORDPRESS_DB_USER
+              Value: "wordpress_db_user"
+            - Name: WORDPRESS_DB_PASSWORD
+              Value: "d!h5L^!oUjBLjLa49J#M"
+            - Name: WORDPRESS_DB_NAME
+              Value: "wordpress_db"
+          HealthCheck:
+            Command:
+              - "CMD-SHELL"
+              - "curl -f http://localhost/readme.html || exit 1"
+            StartPeriod: 60
+          LogConfiguration:
+            LogDriver: "awslogs"
+            Options:
+              awslogs-region: "ap-northeast-1"
+              awslogs-group: !Ref ECSTaskLogs
+              awslogs-stream-prefix: "wordpress-container"
+
+# ECSTaskAutoScalingGroup
+# Updated by CodeDeploy(appspec.yaml)
+# The detailed configuration is done in TaskSet.
+  ECSService:
+    Type: AWS::ECS::Service
+    Properties: 
+      ServiceName: "ECSService"
+      Cluster: !Ref ECSCluster
+      DeploymentController:
+          Type: "EXTERNAL"
+      CapacityProviderStrategy:
+        - CapacityProvider: !Ref ECSCapacityProviderEC2
+          Base: 2
+          Weight: 1
+      DesiredCount: 4
+      EnableExecuteCommand: true
+      PlacementStrategies:
+        - Field: "attribute:ecs.availability-zone"
+          Type: "spread"
+
+  ECSServiceAutoScalableTarget:
+    DependsOn: ECSService
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: 12
+      MinCapacity: 4
+      ResourceId: "service/ECSCluster/ECSService"
+      RoleARN: !GetAtt ECSServiceAutoScalingIAMRole.Arn
+      ScalableDimension: "ecs:service:DesiredCount"
+      ServiceNamespace: "ecs"
+
+  ECSServiceAutoScalingPolicy:
+    DependsOn: ECSServiceAutoScalableTarget
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: "ECSServiceAutoScalingPolicy"
+      PolicyType: "TargetTrackingScaling"
+      ScalingTargetId: !Ref ECSServiceAutoScalableTarget
+      TargetTrackingScalingPolicyConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: "ECSServiceAverageCPUUtilization"
+        ScaleInCooldown: 120
+        ScaleOutCooldown: 300
+        TargetValue: 80
+
+  ECSTaskSet:
+    Type: AWS::ECS::TaskSet
+    Properties:
+      Cluster: !Ref ECSCluster
+      Service: !Ref ECSService
+      TaskDefinition: !Ref ECSTaskDefinition
+      LaunchType: "EC2"
+      LoadBalancers:
+        - TargetGroupArn:
+            !ImportValue
+              Fn::Sub: "${ALBStackName}-ALBTargetGroupArn"
+          ContainerName: "wordpress-container"
+          ContainerPort: 80
+      Scale:
+        Unit: "PERCENT"
+        Value: 100
+
+  ECSPrimaryTaskSet:
+    Type: AWS::ECS::PrimaryTaskSet
+    Properties: 
+      Cluster: !Ref ECSCluster
+      Service: !Ref ECSService
+      TaskSetId: !GetAtt ECSTaskSet.Id
+
+
+
+
+
+  ECSExecClousWatchLogs:
+    Type: AWS::Logs::LogGroup
+    Properties: 
+      LogGroupName: !Sub "${AWS::StackName}-ECSExecClousWatchLogs"
+      RetentionInDays: 1
+
+  ECSTaskLogs:
+    Type: AWS::Logs::LogGroup
+    Properties: 
+      LogGroupName: !Sub "${AWS::StackName}-ECSTaskLogs"
+      RetentionInDays: 1
+
+  ECSExecutionIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: "ECSExecutionIAMRole"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - "sts:AssumeRole"
+            Principal:
+              Service:
+                - ecs-tasks.amazonaws.com
+      Policies:
+        - PolicyName: "ECSExecutionIAMPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "ecr:*"
+                  - "logs:*"
+                  - "s3:*"
+                Resource: "*"
+
+  ECSTaskIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: "ECSTaskIAMRole"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - "sts:AssumeRole"
+            Principal:
+              Service:
+                - ecs-tasks.amazonaws.com
+      Policies:
+        - PolicyName: "ECSExecutionIAMPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "sts:AssumeRole"
+                Resource: "*"
+
+  ECSServiceAutoScalingIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: "ECSServiceAutoScalingIAMRole"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - "sts:AssumeRole"
+            Principal:
+              Service:
+                - ecs.application-autoscaling.amazonaws.com
+      Policies:
+        - PolicyName: "ECSServiceAutoScalingIAMPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "application-autoscaling:*"
+                  - "ecs:DescribeServices"
+                  - "ecs:UpdateService"
+                  - "cloudwatch:*"
+                  - "iam:CreateServiceLinkedRole"
+                  - "sns:*"
+                Resource:
+                  - "*"

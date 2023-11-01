@@ -1,0 +1,127 @@
+# Create a [VPC-Stack] and [SG-Stack] in advance
+# Create a stack with the name [EFS-Stack]
+
+# AWS resources to be built
+# ・EFS
+# ・Backup(For EFS)
+
+Parameters:
+  VPCStackName:
+    Type: String
+    Default: 'VPC-Stack'
+
+  SGStackName:
+    Type: String
+    Default: 'SG-Stack'
+
+
+
+
+
+Resources:
+  EFSFileSystem:
+    Type: AWS::EFS::FileSystem
+    Properties:
+      Encrypted: False
+      PerformanceMode: "generalPurpose"
+      ThroughputMode: "bursting"
+      LifecyclePolicies:
+        - TransitionToIA: "AFTER_30_DAYS"
+        - TransitionToPrimaryStorageClass: "AFTER_1_ACCESS"
+      FileSystemTags:
+        - Key: "Name"
+          Value: "EFS"
+
+  EFSMountTarget1A:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref EFSFileSystem
+      SecurityGroups:
+        - !ImportValue
+            Fn::Sub: "${SGStackName}-EFSSecurityGroupId"
+      SubnetId:
+        !ImportValue
+          Fn::Sub: "${VPCStackName}-PrivateSubnetID1A"
+
+  EFSMountTarget1C:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref EFSFileSystem
+      SecurityGroups:
+        - !ImportValue
+            Fn::Sub: "${SGStackName}-EFSSecurityGroupId"
+      SubnetId:
+        !ImportValue
+          Fn::Sub: "${VPCStackName}-PrivateSubnetID1C"
+
+
+
+
+
+  EFSBackupPlan:
+    Type: AWS::Backup::BackupPlan
+    Properties:
+      BackupPlan:
+        BackupPlanName: "EFSBackupPlan"
+        BackupPlanRule:
+          - RuleName: "EFSBackupPlanRule"
+            TargetBackupVault: !Ref EFSBackupVault
+            CompletionWindowMinutes: 120
+            StartWindowMinutes: 60
+            Lifecycle:
+              MoveToColdStorageAfterDays: 7
+              DeleteAfterDays: 97
+            ScheduleExpressionTimezone: "Asia/Tokyo"
+            ScheduleExpression: "cron(0 22 * * ? *)"
+
+  EFSBackupSelection:
+    Type: AWS::Backup::BackupSelection
+    Properties:
+      BackupPlanId: !Ref EFSBackupPlan
+      BackupSelection:
+        SelectionName: "EFSBackupSelection"
+        IamRoleArn: !GetAtt EFSBackupIAMRole.Arn
+        Resources:
+          - !GetAtt EFSFileSystem.Arn
+
+  EFSBackupVault:
+    Type: AWS::Backup::BackupVault
+    Properties:
+      BackupVaultName: "EFSBackupVault"
+
+  EFSBackupIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: "EFSBackupIAMRole"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - "sts:AssumeRole"
+            Principal:
+              Service:
+                - backup.amazonaws.com
+      Policies:
+        - PolicyName: "EFSBackupIAMPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: "backup:*"
+                Resource: "*"
+
+
+
+
+
+Outputs:
+  EFSFileSystemARN:
+    Value: !GetAtt EFSFileSystem.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-EFSFileSystemARN"
+
+  EFSFileSystemID:
+    Value: !GetAtt EFSFileSystem.FileSystemId
+    Export:
+      Name: !Sub "${AWS::StackName}-EFSFileSystemID"

@@ -1,0 +1,382 @@
+# Create a stack with the name [VPC-Stack]
+
+# AWS resources to be built
+# ・VPC
+# ・PublicSubnet (1A、1C)
+# ・PrivateSubnet (1A、1C)
+# ・ProtectedSubnet (1A、1C)
+# ・InternetGateway
+# ・NatGateway (1A、1C)
+# ・RouteTable (For each subnet)
+
+Parameters:
+  VPCCIDR:
+    Type: String
+    Default: 10.0.0.0/16
+
+  PublicSubnetCIDR1A:
+    Type: String
+    Default: 10.0.1.0/24
+
+  PublicSubnetCIDR1C:
+    Type: String
+    Default: 10.0.2.0/24
+
+  PrivateSubnetCIDR1A:
+    Type: String
+    Default: 10.0.3.0/24
+
+  PrivateSubnetCIDR1C:
+    Type: String
+    Default: 10.0.4.0/24
+
+  ProtectedSubnetCIDR1A:
+    Type: String
+    Default: 10.0.5.0/24
+
+  ProtectedSubnetCIDR1C:
+    Type: String
+    Default: 10.0.6.0/24
+
+
+
+
+
+Resources:
+  VPC:
+    Type: "AWS::EC2::VPC"
+    Properties:
+      CidrBlock: !Ref VPCCIDR
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: "Name"
+          Value: "VPC"
+
+  PublicSubnet1A:
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      CidrBlock: !Ref PublicSubnetCIDR1A
+      AvailabilityZone: "ap-northeast-1a"
+      MapPublicIpOnLaunch: true
+      VpcId: !Ref VPC
+      Tags:
+        - Key: "Name"
+          Value: "PublicSubnet1A"
+
+  PublicSubnet1C:
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      CidrBlock: !Ref PublicSubnetCIDR1C
+      AvailabilityZone: "ap-northeast-1c"
+      MapPublicIpOnLaunch: true
+      VpcId: !Ref VPC
+      Tags:
+        - Key: "Name"
+          Value: "PublicSubnet1C"
+
+  PrivateSubnet1A:
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      CidrBlock: !Ref PrivateSubnetCIDR1A
+      AvailabilityZone: "ap-northeast-1a"
+      MapPublicIpOnLaunch: false
+      VpcId: !Ref VPC
+      Tags:
+        - Key: "Name"
+          Value: "PrivateSubnet1A"
+
+  PrivateSubnet1C:
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      CidrBlock: !Ref PrivateSubnetCIDR1C
+      AvailabilityZone: "ap-northeast-1c"
+      MapPublicIpOnLaunch: false
+      VpcId: !Ref VPC
+      Tags:
+        - Key: "Name"
+          Value: "PrivateSubnet1C"
+
+  ProtectedSubnet1A:
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      CidrBlock: !Ref ProtectedSubnetCIDR1A
+      AvailabilityZone: "ap-northeast-1a"
+      MapPublicIpOnLaunch: false
+      VpcId: !Ref VPC
+      Tags:
+        - Key: "Name"
+          Value: "ProtectedSubnet1A"
+
+  ProtectedSubnet1C:
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      CidrBlock: !Ref ProtectedSubnetCIDR1C
+      AvailabilityZone: "ap-northeast-1c"
+      MapPublicIpOnLaunch: false
+      VpcId: !Ref VPC
+      Tags:
+        - Key: "Name"
+          Value: "ProtectedSubnet1C"
+
+
+
+
+
+  InternetGateway:
+    Type: "AWS::EC2::InternetGateway"
+    Properties:
+      Tags:
+        - Key: "Name"
+          Value: "InternetGateway"
+  
+  InternetGatewayAttachment:
+    Type: "AWS::EC2::VPCGatewayAttachment"
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  NatGatewayEIP1A:
+    Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: "Name"
+          Value: "ElasticIP1A"
+
+  NatGatewayEIP1C:
+    Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: "Name"
+          Value: "ElasticIP1C"
+
+  NatGateway1A:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGatewayEIP1A.AllocationId
+      SubnetId: !Ref PublicSubnet1A
+      Tags:
+        - Key: "Name"
+          Value: "NatGateway1A"
+
+  NatGateway1C:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGatewayEIP1C.AllocationId
+      SubnetId: !Ref PublicSubnet1C
+      Tags:
+        - Key: "Name"
+          Value: "NatGateway1C"
+
+
+
+
+
+  PublicRouteTable1A:
+    Type: "AWS::EC2::RouteTable"
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: "Name"
+          Value: "PublicRouteTable1A"
+
+  PublicRoute1A:
+    Type: "AWS::EC2::Route"
+    Properties:
+      RouteTableId: !Ref PublicRouteTable1A
+      DestinationCidrBlock: "0.0.0.0/0"
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetRouteTableAssociation1A:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties:
+      SubnetId: !Ref PublicSubnet1A
+      RouteTableId: !Ref PublicRouteTable1A
+
+  PublicRouteTable1C:
+    Type: "AWS::EC2::RouteTable"
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: "Name"
+          Value: "PublicRouteTable1C"
+
+  PublicRoute1C:
+    Type: "AWS::EC2::Route"
+    Properties:
+      RouteTableId: !Ref PublicRouteTable1C
+      DestinationCidrBlock: "0.0.0.0/0"
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetRouteTableAssociation1C:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties:
+      SubnetId: !Ref PublicSubnet1C
+      RouteTableId: !Ref PublicRouteTable1C
+
+
+
+
+
+  PrivateRouteTable1A:
+    Type: "AWS::EC2::RouteTable"
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: "Name"
+          Value: "PrivateRouteTable1A"
+
+  PrivateRouteToInternet1A:
+    Type: "AWS::EC2::Route"
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable1A
+      DestinationCidrBlock: "0.0.0.0/0"
+      NatGatewayId: !Ref NatGateway1A
+
+  PrivateSubnetRouteTableAssociation1A:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties:
+      SubnetId: !Ref PrivateSubnet1A
+      RouteTableId: !Ref PrivateRouteTable1A
+
+  PrivateRouteTable1C:
+    Type: "AWS::EC2::RouteTable"
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: "Name"
+          Value: "PrivateRouteTable1C"
+
+  PrivateRouteToInternet1C:
+    Type: "AWS::EC2::Route"
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable1C
+      DestinationCidrBlock: "0.0.0.0/0"
+      NatGatewayId: !Ref NatGateway1C
+
+  PrivateSubnetRouteTableAssociation1C:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties:
+      SubnetId: !Ref PrivateSubnet1C
+      RouteTableId: !Ref PrivateRouteTable1C
+
+
+
+
+
+  ProtectedRouteTable1A:
+    Type: "AWS::EC2::RouteTable"
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: "Name"
+          Value: "ProtectedRouteTable1A"
+
+  ProtectedSubnetRouteTableAssociation1A:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties:
+      SubnetId: !Ref ProtectedSubnet1A
+      RouteTableId: !Ref ProtectedRouteTable1A
+
+  ProtectedRouteTable1C:
+    Type: "AWS::EC2::RouteTable"
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: "Name"
+          Value: "ProtectedRouteTable1C"
+
+  ProtectedSubnetRouteTableAssociation1C:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties:
+      SubnetId: !Ref ProtectedSubnet1C
+      RouteTableId: !Ref ProtectedRouteTable1C
+
+
+
+
+
+Outputs:
+  VPCID:
+    Value: !GetAtt VPC.VpcId
+    Export:
+      Name: !Sub "${AWS::StackName}-VPCID"
+  
+  VPCCIDR:
+    Value: !GetAtt VPC.CidrBlock
+    Export:
+      Name: !Sub "${AWS::StackName}-VPCCIDR"
+
+  PublicSubnetID1A:
+    Value: !GetAtt PublicSubnet1A.SubnetId
+    Export:
+      Name: !Sub "${AWS::StackName}-PublicSubnetID1A"
+
+  PublicSubnetCIDR1A:
+    Value: !GetAtt PublicSubnet1A.CidrBlock
+    Export:
+      Name: !Sub "${AWS::StackName}-PublicSubnetCIDR1A"
+
+  PublicSubnetID1C:
+    Value: !GetAtt PublicSubnet1C.SubnetId
+    Export:
+      Name: !Sub "${AWS::StackName}-PublicSubnetID1C"
+
+  PublicSubnetCIDR1C:
+    Value: !GetAtt PublicSubnet1C.CidrBlock
+    Export:
+      Name: !Sub "${AWS::StackName}-PublicSubnetCIDR1C"
+
+  PrivateSubnetID1A:
+    Value: !GetAtt PrivateSubnet1A.SubnetId
+    Export:
+      Name: !Sub "${AWS::StackName}-PrivateSubnetID1A"
+
+  PrivateSubnetCIDR1A:
+    Value: !GetAtt PrivateSubnet1A.CidrBlock
+    Export:
+      Name: !Sub "${AWS::StackName}-PrivateSubnetCIDR1A"
+
+  PrivateSubnetID1C:
+    Value: !GetAtt PrivateSubnet1C.SubnetId
+    Export:
+      Name: !Sub "${AWS::StackName}-PrivateSubnetID1C"
+
+  PrivateSubnetCIDR1C:
+    Value: !GetAtt PrivateSubnet1C.CidrBlock
+    Export:
+      Name: !Sub "${AWS::StackName}-PrivateSubnetCIDR1C"
+
+  ProtectedSubnetID1A:
+    Value: !GetAtt ProtectedSubnet1A.SubnetId
+    Export:
+      Name: !Sub "${AWS::StackName}-ProtectedSubnetID1A"
+
+  ProtectedSubnetCIDR1A:
+    Value: !GetAtt ProtectedSubnet1A.CidrBlock
+    Export:
+      Name: !Sub "${AWS::StackName}-ProtectedSubnetCIDR1A"
+
+  ProtectedSubnetID1C:
+    Value: !GetAtt ProtectedSubnet1C.SubnetId
+    Export:
+      Name: !Sub "${AWS::StackName}-ProtectedSubnetID1C"
+
+  ProtectedSubnetCIDR1C:
+    Value: !GetAtt ProtectedSubnet1C.CidrBlock
+    Export:
+      Name: !Sub "${AWS::StackName}-ProtectedSubnetCIDR1C"
+
+  PrivateRouteTableID1A:
+    Value: !GetAtt PrivateRouteTable1A.RouteTableId
+    Export:
+      Name: !Sub "${AWS::StackName}-PrivateRouteTableID1A"
+  
+  PrivateRouteTableID1C:
+    Value: !GetAtt PrivateRouteTable1C.RouteTableId
+    Export:
+      Name: !Sub "${AWS::StackName}-PrivateRouteTableID1C"
