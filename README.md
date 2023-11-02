@@ -5,7 +5,7 @@
 
 0. Create an IAM Role to create the stack in CloudFormation<br>
    If you put an AdministratorAccess policy on it, there is no problem
-1. Create a CloudFormation Stack named <span style="color: rgb(0,255,255);">[VPC-Stack]</span> from <span style="color: rgb(0,255,255);">[1VPC-CloudFormation.yml]</span>
+1. Create a CloudFormation Stack named <span style="color: blue;">[VPC-Stack]</span> from <span style="color: rgb(0,255,255);">[1VPC-CloudFormation.yml]</span>
 2. Create a CloudFormation Stack named <span style="color: rgb(0,255,255);">[SG-Stack]</span> from <span style="color: rgb(0,255,255);">[2SG-CloudFormation.yml]</span>
 3. Create a CloudFormation Stack named <span style="color: rgb(0,255,255);">[RDS-Stack]</span> from <span style="color: rgb(0,255,255);">[3RDS-CloudFormation.yml]</span>
 4. Create a CloudFormation Stack named <span style="color: rgb(0,255,255);">[EFS-Stack]</span> from <span style="color: rgb(0,255,255);">[4EFS-CloudFormation.yml]</span>
