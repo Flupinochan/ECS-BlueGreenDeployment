@@ -23,12 +23,12 @@
 11. After building the ECS, you will be able to access wordpress. Try accessing the ALB DNS name
 12. Create a CloudFormation Stack named `[CodePipeline-Stack]` from `[8CodePipeline-CloudFormation.yml]`<br>
     Blue/Green Deployment is executed<br>
-    Look at CodePipeline, number of ECS tasks, target groups, etc
+    Look at CodePipeline, number of ECS tasks, target groups, ECS Exec, etc
 13. Delete the CloudFormation Stacks in the reverse order in which they were created<br>
 ★Caution<br>
-    Deleting ECS-Stack will always fail<br>
+    Deleting `[ECS-Stack]` will always fail<br>
     ECS Cluster should be ignored and `[ECS-Stack]` should be deleted with the retain attribute<br>
-    After removing ALB-Stack, please manually remove ECS Cluster<br>
+    After removing `[ALB-Stack]`, please manually remove ECS Cluster<br>
     The reason is that there are container instances in ECS Cluster<br>
     and ECS Cluster cannot be deleted until after `[ALB-Stack]` is deleted.
 ![Flowchart](https://github.com/Flupinochan/ECS-BlueGreenDeployment/assets/140839406/abbbb6a7-1565-4609-a620-80240a335d90)
