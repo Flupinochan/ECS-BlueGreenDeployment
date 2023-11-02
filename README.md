@@ -30,5 +30,5 @@
     ECS Cluster should be ignored and `[ECS-Stack]` should be deleted with the retain attribute<br>
     After removing `[ALB-Stack]`, please manually remove ECS Cluster<br>
     The reason is that there are container instances in ECS Cluster<br>
-    and ECS Cluster cannot be deleted until after `[ALB-Stack]` is deleted.
+    and ECS Cluster cannot be deleted until after `[ALB-Stack]` is deleted<br>
 ![Flowchart](https://github.com/Flupinochan/ECS-BlueGreenDeployment/assets/140839406/abbbb6a7-1565-4609-a620-80240a335d90)
